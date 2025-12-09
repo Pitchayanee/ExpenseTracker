@@ -1,8 +1,8 @@
-name: Build and Deploy to GitHub Pages
+name: Deploy React App to GitHub Pages
+
 on:
   push:
-    branches:
-      - main
+    branches: [ "main", "master" ]
 
 permissions:
   contents: read
@@ -10,51 +10,64 @@ permissions:
   id-token: write
 
 jobs:
-  build-and-upload:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
           cache: 'npm'
+
+      - name: Show Node / npm versions
+        run: |
+          node -v
+          npm -v
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
-
-      - name: Show dist files (debug)
+      - name: Build (run and show workspace)
         run: |
-          echo "=== dist listing ==="
-          ls -la dist || true
+          set -o pipefail
+          echo "Running npm run build..."
+          if ! npm run build 2>&1 | tee build.log; then
+            echo "::error::npm run build failed. See build.log."
+            ls -la || true
+            exit 1
+          fi
+          echo "Build succeeded."
+          ls -la ./build || true
+          ls -la ./dist || true
 
-      - name: Show dist/index.html head (debug)
+      - name: Detect artifact path (build vs dist)
+        id: detect
         run: |
-          echo "=== dist/index.html head ==="
-          sed -n '1,160p' dist/index.html || true
+          if [ -d "./build" ]; then
+            echo "ARTIFACT_PATH=./build" >> $GITHUB_ENV
+          elif [ -d "./dist" ]; then
+            echo "ARTIFACT_PATH=./dist" >> $GITHUB_ENV
+          else
+            echo "::error::No build output found."
+            ls -la || true
+            exit 1
+          fi
 
-      - name: Upload artifact for GitHub Pages
-        uses: actions/upload-pages-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: ${{ env.ARTIFACT_PATH }}
 
   deploy:
-    needs: build-and-upload
+    needs: build
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v1
+        id: deployment
+        uses: actions/deploy-pages@v4
